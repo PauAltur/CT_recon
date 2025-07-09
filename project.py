@@ -27,10 +27,15 @@ def acquire_projections(image, max_angle=180, n_projections=180, axis="y"):
         image (np.ndarray): Input image to be projected.
         max_angle (int): Maximum angle for projections in degrees.
         n_projections (int): Number of projections to acquire.
+        axis (str): Axis along which to project the image. 
+            Options are "y" for vertical projection and "x"
+            for horizontal projection.
     
     Returns:
     -------
-        np.ndarray: Array of projections at different angles.
+        np.ndarray: Sinogram of the image, containing n_projections of
+            size n_det_elements, where n_det_elements is the number of
+            detector elements along the specified axis.
     """
     if not isinstance(image, np.ndarray):
         raise ValueError("Input image must be a numpy array.")
@@ -40,7 +45,8 @@ def acquire_projections(image, max_angle=180, n_projections=180, axis="y"):
         raise ValueError("n_projections must be a positive integer.")
 
     angles = np.linspace(0, max_angle, n_projections)
-    projections = np.empty((n_projections, image.shape[0]), dtype=image.dtype)
+    n_det_elements= image.shape[0] if axis == "y" else image.shape[1]
+    projections = np.empty((n_projections, n_det_elements), dtype=image.dtype)
 
     for i, angle in enumerate(angles):
         rotated_image = rotate(image, angle)
@@ -68,7 +74,7 @@ if __name__ == "__main__":
     
     plt.subplot(1, 2, 2)
     plt.title("Projection along Y-axis")
-    plt.imshow(projections, cmap='gray')
+    plt.imshow(projections.T, cmap='gray')
     
     plt.tight_layout()
     plt.show()
