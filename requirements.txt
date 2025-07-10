@@ -2,3 +2,4 @@ ipykernel
 matplotlib
 numpy
 pre-commit
+scipy
