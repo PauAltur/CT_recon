@@ -95,7 +95,7 @@ def filter_projections(sinogram, tau, smooth=False):
             projections of shape (n_projections, n_detector_pixels)
     """
     # generate filter response
-    n_proj, n_det = sinogram.shape
+    _, n_det = sinogram.shape
     n_fft = 2*n_det - 1
     t = np.arange(-n_det // 2, n_det // 2)
 
@@ -115,7 +115,7 @@ def filter_projections(sinogram, tau, smooth=False):
         filtered_FT = S*H
     
     # IFT
-    filtered_sinogram = np.fft.irfft(filtered_FT, n_fft, axis=1)
+    filtered_sinogram = tau * np.fft.irfft(filtered_FT, n_fft, axis=1)
 
     # trim to "same"
     start = (n_det - 1) // 2
@@ -149,6 +149,7 @@ def interpolate_projections(t, sinogram, factor):
 
     return t_new, f(t_new)
 
+ 
 def backproject(Q_theta, N, t, tau):
     """Backproject filtered projections to reconstruct image.
 
