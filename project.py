@@ -331,7 +331,7 @@ def acquire_fanbeam_projections(image, S_arr, D_arr):
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    from shepp_logan import shepp_logan
+    from geometry import shepp_logan
 
     # Generate the Shepp-Logan phantom
     N = 1024

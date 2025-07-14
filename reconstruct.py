@@ -1,5 +1,5 @@
 import numpy as np
-from scipy import signal, interpolate
+from scipy import interpolate
 
 
 class DiscreteWindowedRampFilter():
@@ -74,17 +74,134 @@ class DiscreteWindowedRampFilter():
         filter[n % 2 == 1] = -1 / (n[n % 2 == 1] * np.pi * self.tau)**2
         filter[n == 0] = 1 / (4 * self.tau**2)
         return filter
+
+
+class DiscreteFanBeamFilter():
+    """Discrete fan beam filter for filtered backprojection.
+
+    This filter is used in computed tomography to reconstruct images
+    from their sinograms acquired in a fan beam geometry.
+    It is defined for both integer and array inputs.
+
+    Attributes:
+    ----------
+        alpha (float): Parameter for the filter, must be a positive numeric value.
+    """
+
+    def __init__(self, alpha):
+        """Initialize the discrete fan beam filter with a given alpha.
+        
+        Parameters:
+        ----------
+            alpha (float): Angle in radians between contiguous rays.
+        """
+        if not isinstance(alpha, (int, float)) or alpha <= 0:
+            raise ValueError("alpha must be a positive numeric value.")
+        self.alpha = alpha
+
+    def __call__(self, n):
+        """Evaluate the discrete fan beam filter at n.
+        
+        Parameters:
+        ----------
+            n (int, np.ndarray): Number of points in the filter.
+        
+        Returns:
+        -------
+            (int, np.ndarray): Discrete fan beam filter evaluated at n.
+        """
+        if isinstance(n, int):
+            return self._compute_integer_filter(n)
+        elif isinstance(n, np.ndarray):
+            return self._compute_array_filter(n)
+        
+    def _compute_integer_filter(self, n):
+        """Compute the discrete fan beam filter for an integer n.
+        
+        Parameters:
+        ----------
+            n (int): Number of points in the filter.
+        
+        Returns:
+        -------
+            (int): Discrete fan beam filter evaluated at n.
+        """
+        if n == 0:
+            return 1 / (8 * self.alpha**2)
+        elif n % 2 == 0:
+            return 0
+        elif n % 2 == 1:
+            return (self.alpha / (np.pi * self.alpha * np.sin(n*self.alpha)))**2
+        
+    def _compute_array_filter(self, n):
+        """Compute the discrete fan beam filter for an array n.
+        
+        Parameters:
+        ----------
+            n (np.ndarray): Number of points in the filter.
+        
+        Returns:
+        -------
+            (np.ndarray): Discrete fan beam filter evaluated at n.
+        """
+        filter = np.zeros_like(n, dtype=float)
+        filter[n % 2 == 0] = 0
+        filter[n % 2 == 1] = (self.alpha / (np.pi * self.alpha * np.sin(n[n % 2 == 1]*self.alpha)))**2
+        filter[n == 0] = 1 / (8 * self.alpha**2)
+        return filter
     
 
-def filter_projections(sinogram, tau, smooth=False):
-    """Filter projections with a Windowed Ramp Filter
+def build_filter(N, filter_type="ramp", cutoff=1.0):
+    # Frequency vector
+    freqs = np.fft.fftfreq(N).reshape(-1, 1)
+
+    # Ramp base
+    filt = np.abs(freqs)
+
+    if filter_type == "shepp-logan":
+        filt *= np.sinc(freqs / cutoff)
+    elif filter_type == "cosine":
+        filt *= np.cos(np.pi * freqs / (2 * cutoff))
+    elif filter_type == "hamming":
+        filt *= 0.54 + 0.46 * np.cos(np.pi * freqs / cutoff)
+    elif filter_type == "hann":
+        filt *= 0.5 * (1 + np.cos(np.pi * freqs / cutoff))
+    elif filter_type != "ramp":
+        raise ValueError(f"Unknown filter: {filter_type}")
+
+    # Zero out frequencies beyond cutoff
+    filt[np.abs(freqs) > cutoff] = 0
+
+    return filt.flatten()
+
+
+def filter_projections_freq_kernel(sinogram, filter_kernel, delta_beta=1.0):
+    N = sinogram.shape[1]
+    pad = N
+    sinogram_padded = np.pad(sinogram, ((0,0), (0,pad)), mode="constant")
+    filter_kernel_padded = np.pad(filter_kernel, (0, pad), mode="constant")
+
+    sinogram_fft = np.fft.fft(sinogram_padded, axis=1)
+    filter_fft = np.fft.fft(filter_kernel_padded)
+
+    filtered_fft = sinogram_fft * filter_fft
+    filtered = np.fft.ifft(filtered_fft, axis=1).real
+
+    filtered = filtered[:, :N]  # Crop to original size
+    return filtered * delta_beta
+
+
+def filter_projections(sinogram, filter, factor=1, smooth=False):
+    """Filter projections.
 
     Parameters
     ----------
         sinogram (np.ndarray): Array of projections of shape 
             (n_projections, n_detector_pixels)
-        tau (float): Period for the windowed ramp filter. 
-            Inverse of the Nyquist frequency.
+        filter (callable): Filter instance that can generate a vector
+            to be convolved with the sinogram. 
+        factor (int, optional): Factor by which the filtered projections
+            are multiplied after the IFT.
         smooth (bool, optional): Whether the Filtered projections
             should be smoothed with a Hamming window before the IFT.
             Default is False.
@@ -97,13 +214,12 @@ def filter_projections(sinogram, tau, smooth=False):
     # generate filter response
     _, n_det = sinogram.shape
     n_fft = 2*n_det - 1
-    t = np.arange(-n_det // 2, n_det // 2)
+    n = np.arange(-n_det // 2, n_det // 2)
 
-    filter = DiscreteWindowedRampFilter(tau)
-    h_t = filter(t)
+    h_n = filter(n)
 
     # transform to FFT
-    H = np.fft.rfft(h_t, n_fft)
+    H = np.fft.rfft(h_n, n_fft)
     S = np.fft.rfft(sinogram, n_fft, axis=1)
 
     # optional smoothing
@@ -115,7 +231,7 @@ def filter_projections(sinogram, tau, smooth=False):
         filtered_FT = S*H
     
     # IFT
-    filtered_sinogram = tau * np.fft.irfft(filtered_FT, n_fft, axis=1)
+    filtered_sinogram = factor * np.fft.irfft(filtered_FT, n_fft, axis=1)
 
     # trim to "same"
     start = (n_det - 1) // 2
@@ -150,8 +266,8 @@ def interpolate_projections(t, sinogram, factor):
     return t_new, f(t_new)
 
  
-def backproject(Q_theta, N, t, tau):
-    """Backproject filtered projections to reconstruct image.
+def parallel_backproject(Q_theta, N, t, tau):
+    """Backproject parallel filtered projections to reconstruct image.
 
     Parameters
     ----------
@@ -187,9 +303,26 @@ def backproject(Q_theta, N, t, tau):
     return (np.pi / K) * backproj.sum(axis=0)
 
 
+def angle_factor(R_beta, D, beta):
+    """Adjust each ray in the projection by its corresponding angle factor.
+
+    Parameters
+    ----------
+        R_beta (np.ndarray): Fan beam projection with shape (N_det,).
+        beta (np.ndarray): Array of angles in radians corresponding to
+            each ray in the projection (N_det,).
+
+    Returns
+    -------
+        (np.ndarray): Adjusted fan beam projection with shape (N_det,).
+    """
+    # convert beta to radians
+    return R_beta * D * np.cos(beta)
+
+
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
-    from shepp_logan import shepp_logan
+    from geometry import shepp_logan
     from project import acquire_projections
 
     N = 128
