@@ -1,5 +1,5 @@
 import numpy as np
-   
+
 
 def build_filter(N, filter_type="ramp", cutoff=1.0):
     """Builds a filter.
@@ -40,7 +40,7 @@ def build_filter(N, filter_type="ramp", cutoff=1.0):
 
 def filter_projections_freq_kernel(sinogram, filter_kernel, delta_beta=1.0):
     """Filter projections using a frequency domain filter kernel.
-    
+
     Parameters
     ----------
         sinogram (np.ndarray): Array of projections of shape
@@ -59,11 +59,11 @@ def filter_projections_freq_kernel(sinogram, filter_kernel, delta_beta=1.0):
         raise ValueError("filter_kernel must be a 1D array.")
     if sinogram.ndim != 2:
         raise ValueError("sinogram must be a 2D array.")
-    
+
     # Pad sinogram and filter_kernel to the same length
     N = sinogram.shape[1]
     pad = N
-    sinogram_padded = np.pad(sinogram, ((0,0), (0,pad)), mode="constant")
+    sinogram_padded = np.pad(sinogram, ((0, 0), (0, pad)), mode="constant")
     filter_kernel_padded = np.pad(filter_kernel, (0, pad), mode="constant")
 
     # Perform FFT, multiply, and IFT
@@ -84,10 +84,10 @@ def filter_projections(sinogram, filter, factor=1, smooth=False):
 
     Parameters
     ----------
-        sinogram (np.ndarray): Array of projections of shape 
+        sinogram (np.ndarray): Array of projections of shape
             (N_views, N_det)
         filter (callable): Filter instance that can generate a vector
-            to be convolved with the sinogram. 
+            to be convolved with the sinogram.
         factor (int, optional): Factor by which the filtered projections
             are multiplied after the IFT.
         smooth (bool, optional): Whether the Filtered projections
@@ -101,7 +101,7 @@ def filter_projections(sinogram, filter, factor=1, smooth=False):
     """
     # generate filter response
     _, n_det = sinogram.shape
-    n_fft = 2*n_det - 1
+    n_fft = 2 * n_det - 1
     n = np.arange(-n_det // 2, n_det // 2)
 
     h_n = filter(n)
@@ -114,10 +114,10 @@ def filter_projections(sinogram, filter, factor=1, smooth=False):
     if smooth:
         window_time = np.hamming(n_fft)
         W = np.fft.rfft(window_time)
-        filtered_FT = S*H*W
+        filtered_FT = S * H * W
     else:
-        filtered_FT = S*H
-    
+        filtered_FT = S * H
+
     # IFT
     filtered_sinogram = factor * np.fft.irfft(filtered_FT, n_fft, axis=1)
 
@@ -128,17 +128,18 @@ def filter_projections(sinogram, filter, factor=1, smooth=False):
 
     return filtered_sinogram
 
+
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
-    N_det= 512
+    N_det = 512
     cutoff = 1
 
     freq = np.fft.fftshift(np.fft.fftfreq(N_det))
 
     filter_types = ("ramp", "shepp-logan", "cosine", "hamming", "hann")
 
-    fig, axs = plt.subplots(2,3)
+    fig, axs = plt.subplots(2, 3)
     for ax, filter_type in zip(axs.flat, filter_types):
         filter = build_filter(N_det, filter_type, cutoff=cutoff)
         ax.plot(freq, np.fft.fftshift(filter))

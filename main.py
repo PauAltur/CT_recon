@@ -3,7 +3,11 @@ from omegaconf import DictConfig, OmegaConf
 import matplotlib.pyplot as plt
 from src.project import acquire_fanbeam_projections
 from src.geometry import shepp_logan, setup_geometry
-from src.reconstruct import  interpolate_projections, distance_correction, equiangular_backproject
+from src.reconstruct import (
+    interpolate_projections,
+    distance_correction,
+    equiangular_backproject,
+)
 from src.filter import build_filter, filter_projections_freq_kernel
 
 
@@ -14,11 +18,11 @@ def main(cfg: DictConfig):
     # Set up geometry parameters
     # -----------------------------------
     S, D, theta, beta, fan_angle, delta_beta = setup_geometry(
-        cfg["geometry"]["D_so"], 
+        cfg["geometry"]["D_so"],
         cfg["geometry"]["D_sd"],
-        cfg["geometry"]["R_obj"], 
-        cfg["geometry"]["N_det"], 
-        cfg["geometry"]["N_views"]
+        cfg["geometry"]["R_obj"],
+        cfg["geometry"]["N_det"],
+        cfg["geometry"]["N_views"],
     )
 
     # --------------------------------------------------------
@@ -54,7 +58,11 @@ def main(cfg: DictConfig):
     # plt.show()
 
     # Step 2: Filter the projections using a discrete fan beam filter
-    g = build_filter(cfg["geometry"]["N_det"], filter_type=cfg["filter"]["type"], cutoff=cfg["filter"]["cutoff"])
+    g = build_filter(
+        cfg["geometry"]["N_det"],
+        filter_type=cfg["filter"]["type"],
+        cutoff=cfg["filter"]["cutoff"],
+    )
     Q = filter_projections_freq_kernel(P, g, delta_beta=delta_beta)
     plt.figure(4)
     plt.imshow(Q, cmap="gray")
@@ -64,7 +72,7 @@ def main(cfg: DictConfig):
 
     # Step 3: Interpolate projections
     if cfg["geometry"]["f_interp"] is not None:
-        _, Q = interpolate_projections(beta, Q, f_interp=cfg["geometry"]["f_interp"])        
+        _, Q = interpolate_projections(beta, Q, f_interp=cfg["geometry"]["f_interp"])
     # plt.figure(5)
     # plt.imshow(Q_interp, cmap="gray")
     # plt.title("Interpolated filtered sinogram of Shepp-Logan phantom")
@@ -80,7 +88,7 @@ def main(cfg: DictConfig):
         fan_angle,
         delta_beta,
         f_interp=cfg["geometry"]["f_interp"],
-        mode=cfg["backprojection"]["mode"]
+        mode=cfg["backprojection"]["mode"],
     )
     plt.figure(5)
     plt.imshow(recon, cmap="gray", origin="lower")

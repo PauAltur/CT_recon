@@ -22,7 +22,7 @@ def distance_correction(sinogram, D_so, beta):
 
 def interpolate_projections(t, sinogram, f_interp):
     """Interpolates sinogram by a factor to make backprojection more accurate.
-    
+
     Parameters
     ----------
         t (np.ndarray): X array of projections with shape (n_detection_elements,).
@@ -40,12 +40,12 @@ def interpolate_projections(t, sinogram, f_interp):
     f = interpolate.interp1d(t, sinogram, axis=1)
 
     # perform interpolation
-    t_interp = np.linspace(t[0], t[-1], num=len(t)*f_interp)
+    t_interp = np.linspace(t[0], t[-1], num=len(t) * f_interp)
     sinogram_interp = f(t_interp)
 
     return t_interp, sinogram_interp
 
- 
+
 def parallel_backproject(Q_theta, N, t, tau):
     """Backproject parallel filtered projections to reconstruct image.
 
@@ -60,14 +60,14 @@ def parallel_backproject(Q_theta, N, t, tau):
 
     Returns
     -------
-        (np.ndarray): Reconstructed image with shape (n_pixels, n_pixels). 
+        (np.ndarray): Reconstructed image with shape (n_pixels, n_pixels).
     """
     # magnitude setup
     K, Nt = Q_theta.shape
     theta = np.deg2rad(np.linspace(0, 180, K))
 
     # vectorized computation of t for each (x,y) and theta
-    x, y = np.mgrid[-N//2:N//2, -N//2:N//2] * tau
+    x, y = np.mgrid[-N // 2 : N // 2, -N // 2 : N // 2] * tau
     cos_theta = np.cos(theta)[:, None, None]
     sin_theta = np.sin(theta)[:, None, None]
     t_corresp = x[None, ...] * cos_theta + y[None, ...] * sin_theta
@@ -85,7 +85,7 @@ def parallel_backproject(Q_theta, N, t, tau):
 
 def compute_source_frame_coords(N_pixels, D_so, theta):
     """Compute the source frame coordinates for each pixel in each view.
-    
+
     Parameters
     ----------
         N_pixels (int): Number of pixels per side in image. Assumes square image.
@@ -100,26 +100,36 @@ def compute_source_frame_coords(N_pixels, D_so, theta):
         gamma (np.ndarray): Gamma coordinate for each pixel in each projection view.
             Shape (N_pixels, N_pixels, N_views).
     """
-    y, x = np.mgrid[-N_pixels//2:N_pixels//2, -N_pixels//2:N_pixels//2]  # (N_pixels, N_pixels)
+    y, x = np.mgrid[
+        -N_pixels // 2 : N_pixels // 2, -N_pixels // 2 : N_pixels // 2
+    ]  # (N_pixels, N_pixels)
     r = np.sqrt(x**2 + y**2)  # (N_pixels, N_pixels)
     phi = np.arctan2(y, x)  # (N_pixels, N_pixels)
 
     L = np.sqrt(
-        (D_so + r[..., None] * np.sin(theta[np.newaxis, np.newaxis, :] - phi[..., None]))**2 + \
-        (r[..., None] * np.cos(theta[np.newaxis, np.newaxis, :] - phi[..., None]))**2
-        )  # (N_pixels, N_pixels, N_views)
+        (
+            D_so
+            + r[..., None] * np.sin(theta[np.newaxis, np.newaxis, :] - phi[..., None])
+        )
+        ** 2
+        + (r[..., None] * np.cos(theta[np.newaxis, np.newaxis, :] - phi[..., None]))
+        ** 2
+    )  # (N_pixels, N_pixels, N_views)
     gamma = np.arctan2(
         (r[..., None] * np.cos(theta[np.newaxis, np.newaxis, :] - phi[..., None])),
-        (D_so + r[..., None] * np.sin(theta[np.newaxis, np.newaxis, :] - phi[..., None]))
-        ) # (N_pixels, N_pixels, N_views)
-    
+        (
+            D_so
+            + r[..., None] * np.sin(theta[np.newaxis, np.newaxis, :] - phi[..., None])
+        ),
+    )  # (N_pixels, N_pixels, N_views)
+
     return L, gamma
 
 
 def compute_ray_indices(gamma, fan_angle, delta_beta, f_interp, N_det):
     """Compute ray indices from the angular coordinates.
 
-    This function takes the angular coordinates of each pixel in the image 
+    This function takes the angular coordinates of each pixel in the image
     for each acquired view (gamma), and computes a ray index that will
     later be used to select the relevant rays to backproject each pixel.
 
@@ -138,7 +148,7 @@ def compute_ray_indices(gamma, fan_angle, delta_beta, f_interp, N_det):
             Shape (N_views, N_pixels^2).
         k1 (np.ndarray): Ceil ray indices for each pixel in each view.
             Shape (N_views, N_pixels^2).
-        w (np.ndarray): Linear interpolation weights for each pixels and 
+        w (np.ndarray): Linear interpolation weights for each pixels and
             view.
     """
     N_views = gamma.shape[-1]
@@ -170,9 +180,11 @@ def compute_ray_indices(gamma, fan_angle, delta_beta, f_interp, N_det):
     return k0, k1, w
 
 
-def equiangular_backproject(Q, N_pixels, D_so, theta, fan_angle, delta_beta, f_interp=1, mode="nearest"):
+def equiangular_backproject(
+    Q, N_pixels, D_so, theta, fan_angle, delta_beta, f_interp=1, mode="nearest"
+):
     """Compute backprojection of fan beam acquisition with equiangular detector bins.
-    
+
     Parameters
     ----------
         Q (np.ndarray): Sinogram of acquisitions. Shape (N_views, N_det).
@@ -185,7 +197,7 @@ def equiangular_backproject(Q, N_pixels, D_so, theta, fan_angle, delta_beta, f_i
             interpolated. Default is 1 (i.e. no interpolation).
         mode (str, optional): Interpolation mode. Can be either "nearest" or "linear".
             Default is "nearest".
-    
+
     Returns
     -------
         recon (np.ndarray): Reconstruction array with shape (N_pixels, N_pixels).
@@ -210,16 +222,18 @@ def equiangular_backproject(Q, N_pixels, D_so, theta, fan_angle, delta_beta, f_i
         Q1 = np.take_along_axis(Q, k1, axis=1)  # (N_views, N_pixels^2)
 
         # Interpolate linearly
-        Q_interp= (1 - w) * Q0 + w * Q1
+        Q_interp = (1 - w) * Q0 + w * Q1
 
     # Compute backprojection
     inv_L2 = 1.0 / (L**2)  # (N_pixels, N_pixels, N_views)
-    inv_L2 = inv_L2.transpose(2,0,1).reshape(N_views, -1)  # (N_views, N_pixels^2)
+    inv_L2 = inv_L2.transpose(2, 0, 1).reshape(N_views, -1)  # (N_views, N_pixels^2)
 
-    cos_gamma = np.cos(gamma).transpose(2,0,1).reshape(N_views, -1)  # (N_views, N_pixels^2)
-    weighted = Q_interp * inv_L2 * cos_gamma   # (N_views, N_pixels^2)    
+    cos_gamma = (
+        np.cos(gamma).transpose(2, 0, 1).reshape(N_views, -1)
+    )  # (N_views, N_pixels^2)
+    weighted = Q_interp * inv_L2 * cos_gamma  # (N_views, N_pixels^2)
 
-    recon_flat = (2*np.pi / N_views) * np.sum(weighted, axis=0)  # (N_pixels^2,)
+    recon_flat = (2 * np.pi / N_views) * np.sum(weighted, axis=0)  # (N_pixels^2,)
     recon = recon_flat.reshape(Nx, Ny)  # (N_pixels, N_pixels)
 
     return recon
@@ -233,23 +247,22 @@ if __name__ == "__main__":
 
     N_pixels = 128
     n_proj = 101
-    tau=[100, 10, 1, 0.1, 0.01]
-    
-    fig, axs = plt.subplots(3,3)
+    tau = [100, 10, 1, 0.1, 0.01]
+
+    fig, axs = plt.subplots(3, 3)
 
     phantom = shepp_logan(N_pixels)
     sinogram = acquire_projections(phantom, n_projections=n_proj)
 
-    axs[0,0].imshow(phantom, cmap="gray")
-    axs[0,0].set_title("Shepp-Logan phantom")
+    axs[0, 0].imshow(phantom, cmap="gray")
+    axs[0, 0].set_title("Shepp-Logan phantom")
 
-    axs[0,1].imshow(sinogram, cmap="gray")
-    axs[0,1].set_title("Sinogram of Shepp-Logan phantom")
-    
+    axs[0, 1].imshow(sinogram, cmap="gray")
+    axs[0, 1].set_title("Sinogram of Shepp-Logan phantom")
+
     for ax, tau_i in zip(axs.flat[2:], tau):
-        filtered_sinogram = filter_projections(sinogram, tau=tau_i, smooth=True)  
+        filtered_sinogram = filter_projections(sinogram, tau=tau_i, smooth=True)
         ax.imshow(filtered_sinogram, cmap="gray")
         ax.set_title(f"Filtered sinogram of Shepp-Logan phantom with $\\tau={tau_i}$")
 
     plt.show()
-    
