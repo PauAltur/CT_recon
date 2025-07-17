@@ -1,0 +1,18 @@
+geometry:
+  N_pixels: 256
+  R_obj: 125
+  D_sd: 1000
+  D_so: 500
+  N_det: 512  
+  N_views: 1000  
+  f_interp: null
+
+projection:
+  type: equiangular
+
+filter:
+  type: "shepp-logan"
+  cutoff: 0.01
+
+backprojection:
+  mode: "linear"
