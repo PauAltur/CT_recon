@@ -1,23 +1,6 @@
 import numpy as np
 from scipy import interpolate
-
-
-def distance_correction(sinogram, D_so, beta):
-    """Adjust each ray in the projection by its corresponding distance factor.
-
-    Parameters
-    ----------
-        sinogram (np.ndarray): Fan beam projection with shape (N_views, N_det).
-        D_so (float): Source-object distance.
-        beta (np.ndarray): Array of angles in radians corresponding to
-            each ray in the projection (N_det,).
-
-    Returns
-    -------
-        (np.ndarray): Adjusted fan beam sinogram with shape (N_views, N_det).
-    """
-    # convert beta to radians
-    return sinogram * D_so * np.cos(beta[None, :])
+from src.project import build_filter
 
 
 def interpolate_projections(t, sinogram, f_interp):
@@ -46,41 +29,93 @@ def interpolate_projections(t, sinogram, f_interp):
     return t_interp, sinogram_interp
 
 
-def parallel_backproject(Q_theta, N, t, tau):
-    """Backproject parallel filtered projections to reconstruct image.
+def parallel_reconstruction(
+    sinogram,
+    theta,
+    N_pixels,
+    filter_type,
+    cutoff,
+    period,
+    f_interp=1,
+    interpolation="linear",
+):
+    """
+    Reconstruct image from sinogram acquired with parallel projections.
 
     Parameters
     ----------
-        Q_theta (np.ndarray): Array of projections with shape
-            (n_projections, n_detector_elements).
-        N (int): Number of pixels in the image. Assumption of square
-            image.
-        t (np.ndarray): Projection axis with shape (n_detection_elements,).
-        tau (float): Period of detector elements (cm).
+        sinogram (np.ndarray): (N_views, N_det) array of projections.
+        theta (np.ndarray): (N_views,) array of projection angles.
+        N_pixels (int): Number of pixels per side of the reconstructed image.
+        filter_type (str): Type of filter used in filtering step.
+        cutoff (float): Cutoff frequency for the filter.
+        period (float): Detector element spacing.
+        f_interp (int): Interpolation factor for detector bins (default 1 = no interpolation).
+        interpolation (str): Interpolation method: "linear" or "nearest" (default "linear").
 
     Returns
     -------
-        (np.ndarray): Reconstructed image with shape (n_pixels, n_pixels).
+        recon (np.ndarray): Reconstructed image (N_pixels, N_pixels).
     """
-    # magnitude setup
-    K, Nt = Q_theta.shape
-    theta = np.deg2rad(np.linspace(0, 180, K))
+    N_views, N_det = sinogram.shape
+    t = np.arange(-N_det // 2, N_det // 2) * period
 
-    # vectorized computation of t for each (x,y) and theta
-    x, y = np.mgrid[-N // 2 : N // 2, -N // 2 : N // 2] * tau
-    cos_theta = np.cos(theta)[:, None, None]
-    sin_theta = np.sin(theta)[:, None, None]
-    t_corresp = x[None, ...] * cos_theta + y[None, ...] * sin_theta
+    # Filter projections
+    filt = build_filter(N_det, filter_type, cutoff)
+    sinogram_filt = filter_projections(sinogram, filt, period)
 
-    # find nearest detector bin index for each t in one shot
-    idx = np.searchsorted(t, t_corresp, side="left")
-    idx = np.clip(idx, 0, Nt - 1)
+    # Preinterpolate projections if factor > 1
+    if f_interp > 1:
+        t_interp, sinogram_interp = interpolate_projections(t, sinogram_filt, f_interp)
+    else:
+        t_interp, sinogram_interp = t, sinogram_filt
 
-    # index the elements corresponding to each point
-    angle_idx = np.arange(K)[:, None, None]
-    backproj = Q_theta[angle_idx, idx]
+    # Create image grid (x,y) centered at 0 TODO: move to function
+    y, x = (
+        np.mgrid[-N_pixels // 2 : N_pixels // 2, -N_pixels // 2 : N_pixels // 2]
+        * period
+    )
 
-    return (np.pi / K) * backproj.sum(axis=0)
+    cos_theta = np.cos(theta)[:, None, None]  # (N_views,1,1)
+    sin_theta = np.sin(theta)[:, None, None]  # (N_views,1,1)
+    t_corresp = (
+        x[None, :, :] * cos_theta + y[None, :, :] * sin_theta
+    )  # (N_views, N_pixels, N_pixels)
+
+    view_idx = np.arange(N_views)[:, None, None]
+
+    if interpolation == "nearest":
+        # TODO: Move to function
+        # Nearest neighbor interpolation
+        idx = np.searchsorted(t_interp, t_corresp, side="left")
+        idx = np.clip(idx, 0, len(t_interp) - 1)
+        backproj = sinogram_interp[view_idx, idx]
+
+    elif interpolation == "linear":
+        # TODO: Move to function
+
+        # Find indices bounding t_corresp
+        idx_right = np.searchsorted(t_interp, t_corresp, side="left")
+        idx_right = np.clip(idx_right, 1, len(t_interp) - 1)
+        idx_left = idx_right - 1
+
+        t_left = t_interp[idx_left]
+        t_right = t_interp[idx_right]
+
+        # Weights for linear interpolation
+        weight_right = (t_corresp - t_left) / (t_right - t_left + 1e-12)
+        weight_left = 1.0 - weight_right
+
+        vals_left = sinogram_interp[view_idx, idx_left]
+        vals_right = sinogram_interp[view_idx, idx_right]
+
+        backproj = weight_left * vals_left + weight_right * vals_right
+
+    else:
+        raise ValueError("Interpolation must be 'linear' or 'nearest'")
+
+    recon = (np.pi / N_views) * backproj.sum(axis=0)
+    return recon
 
 
 def compute_source_frame_coords(N_pixels, D_so, theta):
@@ -180,21 +215,35 @@ def compute_ray_indices(gamma, fan_angle, delta_beta, f_interp, N_det):
     return k0, k1, w
 
 
-def equiangular_backproject(
-    Q, N_pixels, D_so, theta, fan_angle, delta_beta, f_interp=1, mode="nearest"
+def equiangular_reconstruction(
+    sinogram,
+    beta,
+    theta,
+    N_pixels,
+    D_so,
+    filter_type,
+    cutoff,
+    period,
+    fan_angle,
+    f_interp=1,
+    mode="nearest",
 ):
     """Compute backprojection of fan beam acquisition with equiangular detector bins.
 
     Parameters
     ----------
-        Q (np.ndarray): Sinogram of acquisitions. Shape (N_views, N_det).
+        sinogram (np.ndarray): Sinogram of acquisitions. Shape (N_views, N_det).
+        beta (np.ndarray): Array of bin angles wrt central ray. Shape (N_det,).
+        theta (np.ndarray): Array of view angles with shape (N_views,).
         N_pixels (int): Number of pixels per image side. Assumes square image.
         D_so (int): Source object distance in pixels.
-        theta (np.ndarray): Array of view angles with shape (N_views,).
+        filter (str): Filter type to convolve with the sinogram.
+        cutoff (float): Cutoff for windowed filters, between 0 and 1.
+        period (float): Discretization period of detector.
         fan_angle (float): Angle of the X-ray beam.
         delta_beta (float): Angle spacing of detector bins.
-        f_interp (int, optional): Factor by which the detector bins have been
-            interpolated. Default is 1 (i.e. no interpolation).
+        f_interp (int, optional): Factor by which the detector bins will be interpolated.
+            Default is 1 (i.e. no interpolation).
         mode (str, optional): Interpolation mode. Can be either "nearest" or "linear".
             Default is "nearest".
 
@@ -205,35 +254,49 @@ def equiangular_backproject(
     # Dimension setup
     Nx = Ny = N_pixels
     N_views = theta.shape[0]
-    N_det = Q.shape[-1]
+    N_det = sinogram.shape[-1]
+
+    # Distance correction
+    sinogram_corr = sinogram * D_so * np.cos(beta[None, :])
+
+    # Filter the projections
+    filter = build_filter(N_det, filter_type, cutoff)
+    sinogram_filt = filter_projections(sinogram_corr, filter, period)
 
     # Compute source frame coordinates
     L, gamma = compute_source_frame_coords(N_pixels, D_so, theta)
 
     # Compute ordinal coords for detector bins
-    k0, k1, w = compute_ray_indices(gamma, fan_angle, delta_beta, f_interp, N_det)
+    k0, k1, w = compute_ray_indices(gamma, fan_angle, period, f_interp, N_det)
 
-    # Collect relevant rays for each view
+    # Perform interpolation either through NN or linear
     if mode == "nearest":
-        Q_interp = np.take_along_axis(Q, k0, axis=1)  # (N_views, N_pixels^2)
+        sinogram_interp = np.take_along_axis(
+            sinogram_filt, k0, axis=1
+        )  # (N_views, N_pixels^2)
     elif mode == "linear":
         # Gather values from Q at both floor and ceil indices
-        Q0 = np.take_along_axis(Q, k0, axis=1)  # (N_views, N_pixels^2)
-        Q1 = np.take_along_axis(Q, k1, axis=1)  # (N_views, N_pixels^2)
+        sinogram_filt_0 = np.take_along_axis(
+            sinogram_filt, k0, axis=1
+        )  # (N_views, N_pixels^2)
+        sinogram_filt_1 = np.take_along_axis(
+            sinogram_filt, k1, axis=1
+        )  # (N_views, N_pixels^2)
 
         # Interpolate linearly
-        Q_interp = (1 - w) * Q0 + w * Q1
+        sinogram_interp = (1 - w) * sinogram_filt_0 + w * sinogram_filt_1
 
     # Compute backprojection
     inv_L2 = 1.0 / (L**2)  # (N_pixels, N_pixels, N_views)
     inv_L2 = inv_L2.transpose(2, 0, 1).reshape(N_views, -1)  # (N_views, N_pixels^2)
-
     cos_gamma = (
         np.cos(gamma).transpose(2, 0, 1).reshape(N_views, -1)
     )  # (N_views, N_pixels^2)
-    weighted = Q_interp * inv_L2 * cos_gamma  # (N_views, N_pixels^2)
+    sinogram_weighted = sinogram_interp * inv_L2 * cos_gamma  # (N_views, N_pixels^2)
 
-    recon_flat = (2 * np.pi / N_views) * np.sum(weighted, axis=0)  # (N_pixels^2,)
+    recon_flat = (2 * np.pi / N_views) * np.sum(
+        sinogram_weighted, axis=0
+    )  # (N_pixels^2,)
     recon = recon_flat.reshape(Nx, Ny)  # (N_pixels, N_pixels)
 
     return recon

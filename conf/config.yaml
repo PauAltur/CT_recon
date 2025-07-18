@@ -4,16 +4,17 @@ geometry:
   R_obj: 125
   D_sd: 1000
   D_so: 500
-  N_det: 512
-  N_views: 1000
-  f_interp: null
 
 projection:
-  type: equiangular
+  N_det: 512
+  N_views: 1000
+  view_range: np.pi
+  type: parallel
 
 filter:
   type: "shepp-logan"
   cutoff: 0.01
 
-backprojection:
-  mode: "linear"
+interpolation:
+  type: "linear"
+  factor: 1

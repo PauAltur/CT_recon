@@ -1,179 +1,5 @@
 import numpy as np
 from numba import njit, prange
-from src.geometry import rotate
-
-
-def parallel_projection(image, axis):
-    """Project an image along a specified axis.
-
-    Parameters:
-    ----------
-        image (np.ndarray): Input image to be projected.
-        axis (str): Axis along which to project the image.
-            Options are "y" for vertical projection
-            and "x" for horizontal projection.
-
-    Returns:
-    -------
-        np.ndarray: Projected image along the specified axis.
-    """
-    return np.sum(image, axis=0) if axis == "y" else np.sum(image, axis=1)
-
-
-def acquire_parallel_projections_loop(
-    image, max_angle=180, n_projections=100, axis="x"
-):
-    """Acquire n parallel projections of an image from 0 to max_angle degrees
-    in a python loop.
-
-    This function computes a sinogram (parallel-beam projections) of `image`
-    by rotating the image and summing along the specified axis. This is usually
-    slower than the vectorised version, but it is easier to understand and uses
-    less memory.
-
-    Parameters:
-    ----------
-        image (np.ndarray): Input image to be projected.
-        max_angle (int, optional): Maximum angle for projections in degrees.
-            Default is 180 degrees.
-        n_projections (int, optional): Number of projections to acquire.
-            Default is 100.
-        axis (str, optional): Axis along which to project the image. Options
-            are "y" for vertical projection and "x" for horizontal projection.
-            Default is "x".
-
-    Returns:
-    -------
-        np.ndarray: Sinogram of the image, containing n_projections of
-            size n_det_elements, where n_det_elements is the number of
-            detector elements along the specified axis.
-    """
-    if not isinstance(image, np.ndarray):
-        raise ValueError("Input image must be a numpy array.")
-    if not isinstance(max_angle, (int, float)) or max_angle <= 0:
-        raise ValueError("max_angle must be a positive numeric value.")
-    if not isinstance(n_projections, int) or n_projections <= 0:
-        raise ValueError("n_projections must be a positive integer.")
-
-    angles = np.linspace(0, max_angle, n_projections)
-    n_det_elements = image.shape[0] if axis == "y" else image.shape[1]
-    projections = np.empty((n_projections, n_det_elements), dtype=image.dtype)
-
-    for i, angle in enumerate(angles):
-        rotated_image = rotate(image, angle)
-        projections[i, :] = parallel_projection(rotated_image, axis=axis)
-
-    return projections
-
-
-def acquire_parallel_projections_vectorised(
-    image, max_angle: float = 180, n_projections: int = 100, axis: str = "x"
-) -> np.ndarray:
-    """
-    Compute a sinogram (parallel‑beam projections) of `image` without any
-    explicit Python loop over the angles.
-
-    Parameters
-    ----------
-    image (np.ndarray): A 2‑D greyscale image.
-    max_angle (float, optional): Upper bound (degrees) of the fan of projections.
-        Default is 180 degrees.
-    n_projections (int, optional): Number of projections to acquire.
-        Default is 100.
-    axis (str): Detector orientation (“y” → vertical detector columns, a Radon
-        transform along the y–axis; “x” → horizontal detector rows). Default is "x".
-
-    Returns
-    -------
-    projections (np.ndarray): Sinogram in which each row is the line‑integral
-        at a given angle. The shape is (n_projections, n_detectors).
-    """
-    if image.ndim != 2:
-        raise ValueError("Only 2‑D greyscale input supported.")
-
-    # Prepare the static pixel coordinate grid (centred at 0,0)
-    h, w = image.shape
-    y, x = np.meshgrid(np.arange(h), np.arange(w), indexing="ij")  # (H, W)
-    coords = np.stack((x.ravel(), y.ravel()), axis=1).astype(
-        float
-    )  # (Npix, 2) where Npix = H*W
-
-    centre = np.array(
-        [
-            (w - 1) / 2.0,  # note: (w‑1, h‑1) centres exactly
-            (h - 1) / 2.0,
-        ]
-    )  # (2,)
-
-    coords -= centre  # shift to 0,0
-
-    # Build the whole stack of 2×2 rotation matrices at once
-    angles = np.deg2rad(
-        np.linspace(0.0, max_angle, n_projections, endpoint=False)
-    )  # (P,)
-    c, s = np.cos(angles), np.sin(angles)  # (P,)
-
-    rotmats = np.stack(
-        (np.stack((c, -s), axis=-1), np.stack((s, c), axis=-1)), axis=-2
-    )  # (P, 2, 2)
-
-    # Rotate *all* pixel coordinates for *all* angles in one call
-    rotated_coords = coords @ rotmats.transpose(0, 2, 1)  # (P, Npix, 2)
-    rotated_coords += centre  # undo shift
-
-    # Map floating‑point coords → integer pixel indices and reject points
-    # that fall outside the FOV
-    x_rot = np.rint(rotated_coords[..., 0]).astype(np.int32)  # (P, Npix)
-    y_rot = np.rint(rotated_coords[..., 1]).astype(np.int32)  # (P, Npix)
-
-    valid = (0 <= x_rot) & (x_rot < w) & (0 <= y_rot) & (y_rot < h)  # (P, Npix)
-
-    # Gather intensity values for every (angle, pixel) pair in one advanced‑indexing operation
-    img_flat = image.ravel()  # (Npix,)
-    flat_idx = y_rot * w + x_rot  # (P, Npix)
-    pixel_vals = np.where(valid, img_flat.take(flat_idx, mode="clip"), 0)  # (P, Npix)
-
-    # Reduce (sum) along the chosen detector direction
-    # Reshape to (P, H, W) so the reduction axis is contiguous.
-    cube = pixel_vals.reshape(n_projections, h, w)  # (P, H, W)
-    projections = (
-        cube.sum(axis=2) if axis == "x" else cube.sum(axis=1)
-    )  # (P, n_detectors)
-
-    return projections
-
-
-def acquire_parallel_projections(
-    image, max_angle=180, n_projections=100, axis="x", vectorised=True
-):
-    """Acquire n parallel projections of an image from 0 to max_angle degrees.
-
-    This function computes a sinogram (parallel-beam projections) of `image`
-    by rotating the image and summing along the specified axis. It can use
-    either a vectorised or a loop-based approach.
-
-    Parameters:
-    ----------
-        image (np.ndarray): Input image to be projected.
-        max_angle (int): Maximum angle for projections in degrees.
-        n_projections (int): Number of projections to acquire.
-        axis (str): Axis along which to project the image.
-            Options are "y" for vertical projection and "x"
-            for horizontal projection.
-        vectorised (bool): If True, use vectorised computation; otherwise, use loop-based.
-
-    Returns:
-    -------
-        np.ndarray: Sinogram of the image, containing n_projections of
-            size n_det_elements, where n_det_elements is the number of
-            detector elements along the specified axis.
-    """
-    if vectorised:
-        return acquire_parallel_projections_vectorised(
-            image, max_angle, n_projections, axis
-        )
-    else:
-        return acquire_parallel_projections_loop(image, max_angle, n_projections, axis)
 
 
 @njit  # ← compiles and accelerates the function
@@ -241,7 +67,7 @@ def siddon_geom_numba(image, Sg, Dg):
 
         if 0 <= xi < nx and 0 <= yi < ny:
             seg_len = np.hypot(delta_x * (t[i + 1] - t[i]), delta_y * (t[i + 1] - t[i]))
-            vals += image[xi, yi] * seg_len
+            vals += image[yi, xi] * seg_len
 
     return vals
 
@@ -249,7 +75,8 @@ def siddon_geom_numba(image, Sg, Dg):
 @njit(parallel=True)
 def acquire_fanbeam_projections(image, S_arr, D_arr):
     """
-    Compute the sinogram of a 2D image using Siddon's ray-tracing algorithm.
+    Compute the sinogram of a 2D image with a fan beam using
+    Siddon's ray-tracing algorithm.
 
     Parameters
     ----------
@@ -274,6 +101,67 @@ def acquire_fanbeam_projections(image, S_arr, D_arr):
             sinogram[v, i] = siddon_geom_numba(image, Sg, Dg)
 
     return sinogram
+
+
+@njit(parallel=True)
+def acquire_parallel_projections(image, S_arr, D_arr):
+    """
+    Compute the sinogram of a 2D image with a parallel beam using
+    Siddon's ray-tracing algorithm.
+
+    Parameters
+    ----------
+        image (np.ndarray): 2D float32 array. Voxel size = 1 pixel.
+        S_arr (np.ndarray): 3D array of shape (N_views, N_det, 2) containing
+            source points in geometric coordinates.
+        D_arr (np.ndarray): 3D array of shape (N_views, N_det, 2) containing
+            detector bins in geometric coordinates.
+
+    Returns
+    -------
+        sinogram (np.ndarray): 2D array of shape (N_views, N_det) containing
+            the sinogram.
+    """
+    N_views, N_det, _ = D_arr.shape
+    sinogram = np.zeros((N_views, N_det), dtype=np.float32)
+
+    for v in prange(N_views):
+        for i in range(N_det):
+            Sg = S_arr[v, i]
+            Dg = D_arr[v, i]
+            sinogram[v, i] = siddon_geom_numba(image, Sg, Dg)
+
+    return sinogram
+
+
+def acquire_projections(image, S_arr, D_arr, mode="parallel"):
+    """
+    Dispatch function to compute sinogram for either parallel or fan-beam geometry.
+
+    Parameters
+    ----------
+        image : np.ndarray
+            2D float32 image array.
+        S_arr : np.ndarray
+            Source coordinates. Shape:
+                - (N_views, N_det, 2) for 'parallel'
+                - (N_views, 2) for 'fanbeam'
+        D_arr : np.ndarray
+            Detector coordinates. Shape: (N_views, N_det, 2)
+        mode : str
+            Either 'parallel' or 'fanbeam'.
+
+    Returns
+    -------
+        sinogram : np.ndarray
+            2D array of shape (N_views, N_det)
+    """
+    if mode == "parallel":
+        return acquire_parallel_projections(image, S_arr, D_arr)
+    elif mode == "fanbeam":
+        return acquire_fanbeam_projections(image, S_arr, D_arr)
+    else:
+        raise ValueError(f"Unknown projection mode: {mode}")
 
 
 if __name__ == "__main__":
