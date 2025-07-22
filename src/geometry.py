@@ -1,6 +1,32 @@
 import numpy as np
 
 
+def delta_phantom(N: int, x: int, y: int) -> np.ndarray:
+    """Generate a delta phantom image.
+
+    Args:
+        N (int): Number of pixels per side.
+        x (int): X coordinate in a Cartesian frame.
+        y (int): Y coordinate in a Cartesian frame.
+
+    Returns:
+        phantom (npt.ArrayLike): Phantom image.
+    """
+    assert isinstance(N, int), "N has wrong type. Should be an integer."
+    assert isinstance(x, int), "x has wrong type. Should be an integer."
+    assert isinstance(y, int), "y has wrong type. Should be an integer."
+
+    # Convert cartesian coords to row, column
+    col = x + (N // 2)
+    row = (N // 2) - y
+
+    # Compute phantom
+    phantom = np.zeros((N, N))
+    phantom[row, col] = 1
+
+    return phantom
+
+
 def shepp_logan(N):
     """Generate the Shepp-Logan phantom image.
 
@@ -17,7 +43,7 @@ def shepp_logan(N):
 
     # Create a grid of coordinates
     x = np.linspace(-1, 1, N)
-    y = np.linspace(-1, 1, N)
+    y = np.linspace(1, -1, N)
     X, Y = np.meshgrid(x, y)
 
     # Initialize the phantom image
@@ -209,6 +235,10 @@ def setup_geometry(D_so, D_sd, R_obj, N_det, N_views, view_range, mode):
     elif mode == "equidistant":
         raise NotImplementedError(
             "setup_equidistant_geometry function not yet implemented"
+        )
+    else:
+        raise ValueError(
+            "Wrong value for projection type. Should be parallel, equiangular or equidistant"
         )
 
 

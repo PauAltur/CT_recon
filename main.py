@@ -2,63 +2,70 @@ import hydra
 from omegaconf import DictConfig, OmegaConf
 import matplotlib.pyplot as plt
 from src.project import acquire_projections
-from src.geometry import shepp_logan, setup_geometry
+from src.geometry import shepp_logan, delta_phantom, setup_geometry
 from src.reconstruct import equiangular_reconstruction, parallel_reconstruction
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def main(cfg: DictConfig):
     print(OmegaConf.to_yaml(cfg))
-    # -----------------------------------
+
+    plt.ion()  # Turn on interactive mode
+
+    # ---------------------------
     # Set up geometry parameters
-    # -----------------------------------
-    if cfg["projection"] == "parallel":
-        S, D, theta, det_pitch = setup_geometry(
-            cfg["geometry"]["D_so"],
-            cfg["geometry"]["D_sd"],
-            cfg["geometry"]["R_obj"],
-            cfg["projection"]["N_det"],
-            cfg["projection"]["N_views"],
-            cfg["projection"],
-            cfg["projection"]["view_range"],
-        )
-    elif cfg["projection"] in ["equiangular", "equidistant"]:
-        S, D, theta, beta, fan_angle, delta_beta = setup_geometry(
-            cfg["geometry"]["D_so"],
-            cfg["geometry"]["D_sd"],
-            cfg["geometry"]["R_obj"],
-            cfg["projection"]["N_det"],
-            cfg["projection"]["N_views"],
-            cfg["projection"],
-            cfg["projection"]["view_range"],
-        )
+    # ---------------------------
+    geom_tuple = setup_geometry(
+        cfg["geometry"]["D_so"],
+        cfg["geometry"]["D_sd"],
+        cfg["geometry"]["R_obj"],
+        cfg["projection"]["N_det"],
+        cfg["projection"]["N_views"],
+        cfg["projection"]["view_range"],
+        cfg["projection"]["type"],
+    )
+    if cfg["projection"]["type"] == "parallel":
+        S, D, theta, det_pitch = geom_tuple
+    elif cfg["projection"]["type"] == "equiangular":
+        S, D, theta, beta, fan_angle, delta_beta = geom_tuple
+    elif cfg["projection"]["type"] == "equidistant":
+        raise NotImplementedError("Equidistant geometry setup not implemented yet")
 
     # --------------------------------------------------------
-    # Generate Shepp-Logan phantom
+    # Generate phantom
     # --------------------------------------------------------
-    f = shepp_logan(cfg["geometry"]["N_pixels"])
-    # plt.figure(1)
-    # plt.imshow(f, cmap="gray")
-    # plt.title("Shepp-Logan phantom")
-    # plt.axis("off")
-    # plt.show()
+    if cfg["geometry"]["phantom"]["name"] == "shepp-logan":
+        f = shepp_logan(cfg["geometry"]["N_pixels"])
+
+    elif cfg["geometry"]["phantom"]["name"] == "delta":
+        f = delta_phantom(
+            cfg["geometry"]["N_pixels"], **cfg["geometry"]["phantom"]["args"]
+        )
+    plt.figure()
+    plt.imshow(f, cmap="gray", origin="lower")
+    plt.title("Shepp-Logan phantom")
+    plt.axis("off")
+    plt.draw()
+    plt.pause(0.001)
+    # time.sleep(0.5)
 
     # --------------------------------------------------------
     # Acquire projections of the phantom
     # --------------------------------------------------------
-    P = acquire_projections(f, S, D, mode=cfg["projection"])
+    P = acquire_projections(f, S, D, mode=cfg["projection"]["type"])
     plt.figure()
     plt.imshow(P, cmap="gray")
-    plt.title("Sinogram of Shepp-Logan phantom")
+    plt.title("Sinogram of phantom")
     plt.axis("off")
-    plt.show()
+    plt.draw()
+    plt.pause(0.001)
+    # plt.show(block=False)
+    # time.sleep(0.5)
 
     # --------------------------------------------------------------
     # Reconstruct the Shepp-Logan phantom from projections
     # --------------------------------------------------------------
-
-    # Step 4: Backproject the filtered projections
-    if cfg["projection"] == "linear":
+    if cfg["projection"]["type"] == "parallel":
         recon = parallel_reconstruction(
             P,
             theta,
@@ -67,9 +74,9 @@ def main(cfg: DictConfig):
             cfg["filter"]["cutoff"],
             det_pitch,
             cfg["interpolation"]["factor"],
-            cfg["projection"]["view_range"],
+            cfg["interpolation"]["type"],
         )
-    elif cfg["projection"] == "equiangular":
+    elif cfg["projection"]["type"] == "equiangular":
         recon = equiangular_reconstruction(
             P,
             beta,
@@ -80,15 +87,28 @@ def main(cfg: DictConfig):
             cfg["filter"]["cutoff"],
             delta_beta,
             fan_angle,
-            delta_beta,
             f_interp=cfg["interpolation"]["factor"],
             mode=cfg["interpolation"]["type"],
         )
+    elif cfg["projection"]["type"] == "equidistant":
+        raise NotImplementedError(
+            "Reconstruction of equidistant fan beam projections is not implemented"
+        )
+    else:
+        raise ValueError(
+            "Projection type not recognized. Should be parallel, equiangular or equidistant."
+        )
+
     plt.figure()
     plt.imshow(recon, cmap="gray", origin="lower")
-    plt.title("Reconstructed image from fan beam projections")
+    plt.title(f"Reconstructed image {cfg['projection']['type']} projections")
     plt.axis("off")
-    plt.show()
+    plt.draw()
+    plt.pause(0.001)
+
+    input("Press Enter to close all plots...")
+    plt.ioff()
+    plt.close("all")
 
 
 if __name__ == "__main__":

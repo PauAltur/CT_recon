@@ -4,17 +4,26 @@ geometry:
   R_obj: 125
   D_sd: 1000
   D_so: 500
+  # phantom:
+  #   name: delta
+  #   args:
+  #     x: 50
+  #     y: 25
+  phantom:
+    name: shepp-logan
 
 projection:
   N_det: 512
-  N_views: 1000
-  view_range: np.pi
-  type: parallel
+  N_views: 100
+  view_range: 6.28318530718  # 2*pi
+  type: "equiangular"
+  # view_range: 3.14159265358  # pi
+  # type: "parallel"
 
 filter:
-  type: "shepp-logan"
-  cutoff: 0.01
+  type: "ramp"
+  cutoff: 0.5
 
 interpolation:
-  type: "linear"
-  factor: 1
+  type: "nearest"
+  factor: 100

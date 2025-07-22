@@ -1,6 +1,11 @@
 import numpy as np
 from scipy import interpolate
-from src.project import build_filter
+from src.filter import (
+    parallel_filter,
+    build_freq_filter,
+    filter_multiply,
+    filter_convolve,
+)
 
 
 def interpolate_projections(t, sinogram, f_interp):
@@ -8,16 +13,16 @@ def interpolate_projections(t, sinogram, f_interp):
 
     Parameters
     ----------
-        t (np.ndarray): X array of projections with shape (n_detection_elements,).
-        sinogram (np.ndarray): Array of projections with shape (n_projections,
-            n_detection_elements).
+        t (np.ndarray): X array of projections with shape (N_det,).
+        sinogram (np.ndarray): Array of projections with shape (N_views, N_det).
         factor (int): Factor by which the interpolation augments the number of
             sample points.
 
     Returns
     -------
-        (np.ndarray): Array of interpolated projections with shape (n_projections,
-            n_detection_elements * factor).
+        t_interp (np.ndarray): Interpolated X array with shape (N_det * factor)
+        sinogram_interp (np.ndarray): Array of interpolated projections with
+            shape (N_views, N_det * factor).
     """
     # estimate interpolation function
     f = interpolate.interp1d(t, sinogram, axis=1)
@@ -58,11 +63,12 @@ def parallel_reconstruction(
         recon (np.ndarray): Reconstructed image (N_pixels, N_pixels).
     """
     N_views, N_det = sinogram.shape
-    t = np.arange(-N_det // 2, N_det // 2) * period
+    n = np.arange(-N_det // 2, N_det // 2)
+    t = n * period
 
     # Filter projections
-    filt = build_filter(N_det, filter_type, cutoff)
-    sinogram_filt = filter_projections(sinogram, filt, period)
+    filter = parallel_filter(n, period)
+    sinogram_filt = filter_convolve(sinogram, filter, period)
 
     # Preinterpolate projections if factor > 1
     if f_interp > 1:
@@ -71,15 +77,17 @@ def parallel_reconstruction(
         t_interp, sinogram_interp = t, sinogram_filt
 
     # Create image grid (x,y) centered at 0 TODO: move to function
-    y, x = (
-        np.mgrid[-N_pixels // 2 : N_pixels // 2, -N_pixels // 2 : N_pixels // 2]
-        * period
-    )
+    size_physical = N_det * period
+    y, x = np.mgrid[
+        -size_physical / 2 : size_physical / 2 : N_pixels * 1j,
+        -size_physical / 2 : size_physical / 2 : N_pixels * 1j,
+    ]
+    y = -y
 
     cos_theta = np.cos(theta)[:, None, None]  # (N_views,1,1)
     sin_theta = np.sin(theta)[:, None, None]  # (N_views,1,1)
     t_corresp = (
-        x[None, :, :] * cos_theta + y[None, :, :] * sin_theta
+        -x[None, :, :] * sin_theta + y[None, :, :] * cos_theta
     )  # (N_views, N_pixels, N_pixels)
 
     view_idx = np.arange(N_views)[:, None, None]
@@ -93,7 +101,6 @@ def parallel_reconstruction(
 
     elif interpolation == "linear":
         # TODO: Move to function
-
         # Find indices bounding t_corresp
         idx_right = np.searchsorted(t_interp, t_corresp, side="left")
         idx_right = np.clip(idx_right, 1, len(t_interp) - 1)
@@ -115,6 +122,7 @@ def parallel_reconstruction(
         raise ValueError("Interpolation must be 'linear' or 'nearest'")
 
     recon = (np.pi / N_views) * backproj.sum(axis=0)
+    # recon = np.rot90(recon, k=2)
     return recon
 
 
@@ -138,6 +146,8 @@ def compute_source_frame_coords(N_pixels, D_so, theta):
     y, x = np.mgrid[
         -N_pixels // 2 : N_pixels // 2, -N_pixels // 2 : N_pixels // 2
     ]  # (N_pixels, N_pixels)
+    y = -y
+
     r = np.sqrt(x**2 + y**2)  # (N_pixels, N_pixels)
     phi = np.arctan2(y, x)  # (N_pixels, N_pixels)
 
@@ -255,13 +265,14 @@ def equiangular_reconstruction(
     Nx = Ny = N_pixels
     N_views = theta.shape[0]
     N_det = sinogram.shape[-1]
+    # n = np.arange(-N_det // 2, N_det // 2)
 
     # Distance correction
     sinogram_corr = sinogram * D_so * np.cos(beta[None, :])
 
     # Filter the projections
-    filter = build_filter(N_det, filter_type, cutoff)
-    sinogram_filt = filter_projections(sinogram_corr, filter, period)
+    filter = build_freq_filter(N_det, filter_type, cutoff)
+    sinogram_filt = filter_multiply(sinogram_corr, filter, period)
 
     # Compute source frame coordinates
     L, gamma = compute_source_frame_coords(N_pixels, D_so, theta)
@@ -298,6 +309,7 @@ def equiangular_reconstruction(
         sinogram_weighted, axis=0
     )  # (N_pixels^2,)
     recon = recon_flat.reshape(Nx, Ny)  # (N_pixels, N_pixels)
+    recon = np.rot90(recon, k=1)
 
     return recon
 

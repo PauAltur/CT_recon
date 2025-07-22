@@ -149,7 +149,7 @@ def acquire_projections(image, S_arr, D_arr, mode="parallel"):
         D_arr : np.ndarray
             Detector coordinates. Shape: (N_views, N_det, 2)
         mode : str
-            Either 'parallel' or 'fanbeam'.
+            Either 'parallel', 'equiangular' or 'equidistant'.
 
     Returns
     -------
@@ -158,7 +158,7 @@ def acquire_projections(image, S_arr, D_arr, mode="parallel"):
     """
     if mode == "parallel":
         return acquire_parallel_projections(image, S_arr, D_arr)
-    elif mode == "fanbeam":
+    elif mode == "equiangular":
         return acquire_fanbeam_projections(image, S_arr, D_arr)
     else:
         raise ValueError(f"Unknown projection mode: {mode}")
