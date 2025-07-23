@@ -185,6 +185,67 @@ def setup_equiangular_geometry(D_so, D_sd, R_obj, N_det, N_views, view_range=2 *
     return S, D, theta, beta, fan_angle, delta_beta
 
 
+def setup_equidistant_geometry(D_so, D_sd, R_obj, N_det, N_views, view_range=2 * np.pi):
+    """Set up equidistant geometry for CT projection.
+
+    Args:
+        D_so (float): Source-object distance.
+        D_sd (float): Source-detector distance.
+        R_obj (float): Radius of the object.
+        N_det (int): Number of detector bins.
+        N_views (int): Number of angular projections.
+        view_range (float, optional): Angular range of the views.
+            Default is 2*pi as that is optimal for object reconstruction
+            with fanbeam projections.
+
+    Returns:
+        S (np.ndarray): Source positions in lab frame. Shape (N_views, 2).
+        D_theta (np.ndarray): Detector line positions in lab frame. Shape (N_views, 2).
+        D (np.ndarray): Positions of all detector bins at every view in lab frame.
+            Shape (N_views, N_det, 2).
+        theta (np.ndarray): View angles. Shape (N_views,)
+        beta (np.ndarray): Detector angles wrt central ray. Shape (N_det,).
+
+    Args:
+        D_so (_type_): _description_
+        D_sd (_type_): _description_
+        R_obj (_type_): _description_
+        N_det (_type_): _description_
+        N_views (_type_): _description_
+        view_range (_type_): _description_
+    """
+    # Set up basic magnitudes
+    fan_angle = 2 * np.arcsin(R_obj / D_so)  # [rad]
+    det_width = 2 * D_sd * np.sin(fan_angle / 2)  # [pixels]
+    det_pitch = det_width / N_det  # [pixels / det]
+    det_coords = (np.arange(N_det) - (N_det - 1) / 2) * det_pitch
+    theta = np.linspace(0, view_range, N_views, endpoint=False)  # (N_views,) [rad]
+    C = (0, 0)
+
+    # Unit vectors defining source frame at every view
+    e_r = np.stack(
+        [np.cos(theta), np.sin(theta)], axis=1
+    )  # (N_views, 2) radial unit vectors from C to S
+    e_t = np.stack(
+        [-np.sin(theta), np.cos(theta)], axis=1
+    )  # (N_views, 2) tangential unit vectors (right‑hand)
+
+    # Source position in lab frame for every view
+    S = D_so * e_r  # (N_views, 2) source positions in lab frame
+
+    # Position of detector line at every view in lab frame
+    D_central = (
+        C - (D_sd - D_so) * e_r
+    )  # (N_views, 2) detector line positions in lab frame
+
+    # Position of all detector bins at every view in lab frame
+    D = (
+        D_central[:, None, :] + det_coords[None, :, None] * e_t[:, None, :]
+    )  # (N_views, N_det, 2)
+
+    return S, D, theta, det_coords, fan_angle, det_pitch
+
+
 def setup_geometry(D_so, D_sd, R_obj, N_det, N_views, view_range, mode):
     """
     Set up the geometry for the CT projection.
@@ -233,83 +294,11 @@ def setup_geometry(D_so, D_sd, R_obj, N_det, N_views, view_range, mode):
     elif mode == "equiangular":
         return setup_equiangular_geometry(D_so, D_sd, R_obj, N_det, N_views, view_range)
     elif mode == "equidistant":
-        raise NotImplementedError(
-            "setup_equidistant_geometry function not yet implemented"
-        )
+        return setup_equidistant_geometry(D_so, D_sd, R_obj, N_det, N_views, view_range)
     else:
         raise ValueError(
             "Wrong value for projection type. Should be parallel, equiangular or equidistant"
         )
-
-
-def rotate(image, angle):
-    """Rotate an image by a given angle.
-
-    Parameters:
-    ----------
-        image (np.ndarray): Input image to be rotated.
-        angle (float): Angle in degrees to rotate the image.
-
-    Returns:
-    -------
-        np.ndarray: Rotated image.
-    """
-
-    if not isinstance(image, np.ndarray):
-        raise ValueError("Input image must be a numpy array.")
-
-    if not isinstance(angle, (int, float)):
-        raise ValueError("Angle must be a numeric value.")
-
-    # Convert angle to radians
-    angle_rad = np.radians(angle)
-
-    # Get the dimensions of the image
-    h, w = image.shape[:2]
-
-    # Calculate the center of the image
-    center = (w / 2, h / 2)
-
-    # Create the rotation matrix
-    rotation_matrix = np.array(
-        [
-            [np.cos(angle_rad), -np.sin(angle_rad)],
-            [np.sin(angle_rad), np.cos(angle_rad)],
-        ]
-    )
-
-    # Create an output image with the same shape as the input
-    rotated_image = np.zeros_like(image)
-
-    # Create meshgrid of (x, y) coordinates
-    y_indices, x_indices = np.meshgrid(np.arange(h), np.arange(w), indexing="ij")
-    coords = np.stack([x_indices.ravel(), y_indices.ravel()], axis=1)
-
-    # Translate coordinates to center
-    coords_centered = coords - np.array(center)
-
-    # Inverse rotation matrix for backward mapping
-    inv_rotation_matrix = np.linalg.inv(rotation_matrix)
-
-    # Apply inverse rotation
-    rotated_coords = coords_centered @ inv_rotation_matrix.T
-
-    # Translate back to original position
-    rotated_coords += np.array(center)
-
-    # Round and convert to integer indices
-    x_rot = np.round(rotated_coords[:, 0]).astype(int)
-    y_rot = np.round(rotated_coords[:, 1]).astype(int)
-
-    # Mask for valid coordinates
-    mask = (x_rot >= 0) & (x_rot < w) & (y_rot >= 0) & (y_rot < h)
-
-    # Assign pixel values using valid indices
-    rotated_image[y_indices.ravel()[mask], x_indices.ravel()[mask]] = image[
-        y_rot[mask], x_rot[mask]
-    ]
-
-    return rotated_image
 
 
 if __name__ == "__main__":

@@ -31,7 +31,7 @@ def animate_S_D(S, D, image):
     H, W = image.shape[:2]
     extent = [-W / 2, W / 2, -H / 2, H / 2]
 
-    ax.imshow(image, extent=extent, cmap="gray")
+    ax.imshow(image, extent=extent, origin="lower", cmap="gray")
 
     # Plot handles: point S and detector elements D as scatter plots
     scat_S = ax.scatter([], [], c="red", s=80, label="Source S")

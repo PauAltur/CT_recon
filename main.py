@@ -29,8 +29,7 @@ def main(cfg: DictConfig):
     elif cfg["projection"]["type"] == "equiangular":
         S, D, theta, beta, fan_angle, delta_beta = geom_tuple
     elif cfg["projection"]["type"] == "equidistant":
-        raise NotImplementedError("Equidistant geometry setup not implemented yet")
-
+        S, D, theta, det_coords, fan_angle, det_pitch = geom_tuple
     # --------------------------------------------------------
     # Generate phantom
     # --------------------------------------------------------

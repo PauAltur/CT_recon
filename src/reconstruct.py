@@ -131,8 +131,9 @@ def parallel_reconstruction(
     return recon
 
 
-def compute_source_frame_coords(N_pixels, D_so, theta):
-    """Compute the source frame coordinates for each pixel in each view.
+def compute_l_gamma_coords(N_pixels, D_so, theta):
+    """Compute the source frame L and gamma coordinates for each pixel in each view
+    of an equiangular fan beam acquisition.
 
     Parameters
     ----------
@@ -148,6 +149,7 @@ def compute_source_frame_coords(N_pixels, D_so, theta):
         gamma (np.ndarray): Gamma coordinate for each pixel in each projection view.
             Shape (N_pixels, N_pixels, N_views).
     """
+    # Generate cartesian coords and transform to polar
     y, x = np.mgrid[
         -N_pixels // 2 : N_pixels // 2, -N_pixels // 2 : N_pixels // 2
     ]  # (N_pixels, N_pixels)
@@ -156,36 +158,40 @@ def compute_source_frame_coords(N_pixels, D_so, theta):
     r = np.sqrt(x**2 + y**2)  # (N_pixels, N_pixels)
     phi = np.arctan2(y, x)  # (N_pixels, N_pixels)
 
+    # Compute source frame coordinates
+    theta_min90 = (
+        theta - np.pi / 2
+    )  # adjust for different frame of reference wrt view angle
     L = np.sqrt(
         (
             D_so
             + r[..., None]
-            * np.sin((theta[np.newaxis, np.newaxis, :] - np.pi / 2) - phi[..., None])
+            * np.sin(theta_min90[np.newaxis, np.newaxis, :] - phi[..., None])
         )
         ** 2
         + (
             r[..., None]
-            * np.cos((theta[np.newaxis, np.newaxis, :] - np.pi / 2) - phi[..., None])
+            * np.cos(theta_min90[np.newaxis, np.newaxis, :] - phi[..., None])
         )
         ** 2
     )  # (N_pixels, N_pixels, N_views)
     gamma = np.arctan2(
         -(
             r[..., None]
-            * np.cos((theta[np.newaxis, np.newaxis, :] - np.pi / 2) - phi[..., None])
+            * np.cos(theta_min90[np.newaxis, np.newaxis, :] - phi[..., None])
         ),
         (
             D_so
             + r[..., None]
-            * np.sin((theta[np.newaxis, np.newaxis, :] - np.pi / 2) - phi[..., None])
+            * np.sin(theta_min90[np.newaxis, np.newaxis, :] - phi[..., None])
         ),
     )  # (N_pixels, N_pixels, N_views)
 
     return L, gamma
 
 
-def compute_ray_indices(gamma, fan_angle, delta_beta, f_interp, N_det):
-    """Compute ray indices from the angular coordinates.
+def compute_equiangular_ray_indices(gamma, fan_angle, delta_beta, f_interp, N_det):
+    """Compute ray indices from the angular coordinates of equiangular projections.
 
     This function takes the angular coordinates of each pixel in the image
     for each acquired view (gamma), and computes a ray index that will
@@ -281,7 +287,6 @@ def equiangular_reconstruction(
     Nx = Ny = N_pixels
     N_views = theta.shape[0]
     N_det = sinogram.shape[-1]
-    # n = np.arange(-N_det // 2, N_det // 2)
 
     # Distance correction
     sinogram_corr = sinogram * D_so * np.cos(beta[None, :])
@@ -291,10 +296,12 @@ def equiangular_reconstruction(
     sinogram_filt = filter_multiply(sinogram_corr, filter, period)
 
     # Compute source frame coordinates
-    L, gamma = compute_source_frame_coords(N_pixels, D_so, theta)
+    L, gamma = compute_l_gamma_coords(N_pixels, D_so, theta)
 
     # Compute ordinal coords for detector bins
-    k0, k1, w = compute_ray_indices(gamma, fan_angle, period, f_interp, N_det)
+    k0, k1, w = compute_equiangular_ray_indices(
+        gamma, fan_angle, period, f_interp, N_det
+    )
 
     # Perform interpolation either through NN or linear
     if mode == "nearest":
@@ -331,6 +338,95 @@ def equiangular_reconstruction(
         recon = (recon - recon.min()) / (recon.max() - recon.min())
 
     return recon
+
+
+def compute_u_sprime_coords(N_pixels, D_so, theta):
+    """Compute the source frame U and sprime coordinates for each pixel in each view
+    of an equidistant fan beam acquisition.
+
+    Parameters
+    ----------
+        N_pixels (int): Number of pixels per side in image. Assumes square image.
+        D_so (int): Source object distance in pixels.
+        theta (np.ndarray): Angle of central ray with respect to origin for each
+            view. Shape (N_views,).
+
+    Returns
+    -------
+        U (np.ndarray): U ratio for each pixel in each projection view. Shape
+            (N_pixels, N_pixels, N_views).
+        sprime (np.ndarray): S prime coordinate for each pixel in each projection view.
+            Shape (N_pixels, N_pixels, N_views).
+    """
+    # Generate cartesian coords and transform to polar
+    y, x = np.mgrid[
+        -N_pixels // 2 : N_pixels // 2, -N_pixels // 2 : N_pixels // 2
+    ]  # (N_pixels, N_pixels)
+    y = -y
+
+    r = np.sqrt(x**2 + y**2)  # (N_pixels, N_pixels)
+    phi = np.arctan2(y, x)  # (N_pixels, N_pixels)
+
+    # Compute U and sprime
+    theta_min90 = (
+        theta - np.pi / 2
+    )  # adjust for different frame of reference wrt view angle
+    U = (
+        D_so + r[..., None] * np.sin(theta_min90[None, None, :] - phi[..., None])
+    ) / D_so
+    sprime = (
+        D_so
+        * (r[..., None] * np.cos(theta_min90[None, None, :] - phi[..., None]))
+        / (D_so + r[..., None] * np.sin(theta_min90[None, None, :] - phi[..., None]))
+    )
+
+    return U, sprime
+
+
+def equidistant_reconstruction(
+    sinogram,
+    det_coords,
+    theta,
+    N_pixels,
+    D_so,
+    filter_type,
+    cutoff,
+    period,
+    mode="linear",
+    normalize=True,
+):
+    """Compute backprojection of fan beam acquisition with equidistant detector bins.
+
+    Args:
+        sinogram (np.ndarray): Sinogram of acquisitions. Shape (N_views, N_det).
+        det_coords (np.ndarray): Array of bin distances wrt central bin. Shape (N_det,).
+        theta (np.ndarray): Array of view angles with shape (N_views,).
+        N_pixels (int): Number of pixels per image side. Assumes square image.
+        D_so (int): Source object distance in pixels.
+                filter (str): Filter type to convolve with the sinogram.
+        cutoff (float): Cutoff for windowed filters, between 0 and 1.
+        period (float): Discretization period of detector.
+        mode (str, optional): Interpolation mode. Can be either "nearest" or "linear".
+            Default is "nearest".
+        normalize (bool, optional): Whether the reconstruction values should be normalized
+            to the 0-1 range. Default is True.
+    """
+    # Dimension setup
+    Nx = Ny = N_pixels
+    N_views = theta.shape[0]
+    N_det = sinogram.shape[-1]
+
+    # Distance correction
+    sinogram_corr = sinogram * (D_so / np.sqrt(D_so ** +(det_coords[None, :] ** 2)))
+
+    # High-pass filtering to counter blurring
+    filter = build_freq_filter(N_det, filter_type, cutoff, period)
+    sinogram_filt = filter_multiply(sinogram_corr, filter, period)
+
+    # Compute source frame coordinates
+    U, sprime = compute_u_sprime_coords(N_pixels, D_so, theta)
+
+    pass
 
 
 if __name__ == "__main__":

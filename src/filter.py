@@ -54,6 +54,31 @@ def equiangular_filter(n, period):
     return filter
 
 
+def equidistant_filter(n, period):
+    """Analytic filter for equidistant Filtered Backprojection.
+
+    Args:
+        n (np.ndarray): Discrete axis over which the filter impulse
+            response will be computed.
+        period (int, float): Sampling period of the discrete axis.
+
+    Returns:
+        filter (np.ndarray): Discrete filter impulse response over the
+            axis n. Has same shape as n.
+    """
+    assert isinstance(n, np.ndarray), "n has wrong type. Should be numpy array"
+    assert isinstance(period, (int, float)), (
+        "period has wrong type. Should be int or float."
+    )
+
+    filter = np.zeros_like(n, dtype=float)
+
+    filter[n % 2 == 1] = -(1 / 2 * (np.pi * period * (n[n % 2 == 1])) ** 2)
+    filter[n == 0] = 1 / (8 * period**2)
+
+    return filter
+
+
 def build_freq_filter(N, filter_type="ramp", cutoff=None, period=None, num_terms=100):
     """Builds a filter in the frequency domain.
 
