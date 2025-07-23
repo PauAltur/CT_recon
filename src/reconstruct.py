@@ -38,11 +38,10 @@ def parallel_reconstruction(
     sinogram,
     theta,
     N_pixels,
-    filter_type,
-    cutoff,
     period,
     f_interp=1,
     interpolation="linear",
+    normalize=True,
 ):
     """
     Reconstruct image from sinogram acquired with parallel projections.
@@ -52,11 +51,13 @@ def parallel_reconstruction(
         sinogram (np.ndarray): (N_views, N_det) array of projections.
         theta (np.ndarray): (N_views,) array of projection angles.
         N_pixels (int): Number of pixels per side of the reconstructed image.
-        filter_type (str): Type of filter used in filtering step.
-        cutoff (float): Cutoff frequency for the filter.
         period (float): Detector element spacing.
-        f_interp (int): Interpolation factor for detector bins (default 1 = no interpolation).
-        interpolation (str): Interpolation method: "linear" or "nearest" (default "linear").
+        f_interp (int, optional): Interpolation factor for detector bins. The
+            default is 1 which equals no interpolation.
+        interpolation (str, optional): Interpolation method: "linear" or "nearest"
+            (default "linear").
+        normalize (bool, optional): Whether the reconstruction values should be
+            normalized to the 0-1 range. Default is True.
 
     Returns
     -------
@@ -122,7 +123,11 @@ def parallel_reconstruction(
         raise ValueError("Interpolation must be 'linear' or 'nearest'")
 
     recon = (np.pi / N_views) * backproj.sum(axis=0)
-    # recon = np.rot90(recon, k=2)
+
+    # Normalize the recon
+    if normalize is True:
+        recon = (recon - recon.min()) / (recon.max() - recon.min())
+
     return recon
 
 
@@ -154,17 +159,25 @@ def compute_source_frame_coords(N_pixels, D_so, theta):
     L = np.sqrt(
         (
             D_so
-            + r[..., None] * np.sin(theta[np.newaxis, np.newaxis, :] - phi[..., None])
+            + r[..., None]
+            * np.sin((theta[np.newaxis, np.newaxis, :] - np.pi / 2) - phi[..., None])
         )
         ** 2
-        + (r[..., None] * np.cos(theta[np.newaxis, np.newaxis, :] - phi[..., None]))
+        + (
+            r[..., None]
+            * np.cos((theta[np.newaxis, np.newaxis, :] - np.pi / 2) - phi[..., None])
+        )
         ** 2
     )  # (N_pixels, N_pixels, N_views)
     gamma = np.arctan2(
-        (r[..., None] * np.cos(theta[np.newaxis, np.newaxis, :] - phi[..., None])),
+        -(
+            r[..., None]
+            * np.cos((theta[np.newaxis, np.newaxis, :] - np.pi / 2) - phi[..., None])
+        ),
         (
             D_so
-            + r[..., None] * np.sin(theta[np.newaxis, np.newaxis, :] - phi[..., None])
+            + r[..., None]
+            * np.sin((theta[np.newaxis, np.newaxis, :] - np.pi / 2) - phi[..., None])
         ),
     )  # (N_pixels, N_pixels, N_views)
 
@@ -237,6 +250,7 @@ def equiangular_reconstruction(
     fan_angle,
     f_interp=1,
     mode="nearest",
+    normalize=True,
 ):
     """Compute backprojection of fan beam acquisition with equiangular detector bins.
 
@@ -256,6 +270,8 @@ def equiangular_reconstruction(
             Default is 1 (i.e. no interpolation).
         mode (str, optional): Interpolation mode. Can be either "nearest" or "linear".
             Default is "nearest".
+        normalize (bool, optional): Whether the reconstruction values should be normalized
+            to the 0-1 range. Default is True.
 
     Returns
     -------
@@ -309,7 +325,10 @@ def equiangular_reconstruction(
         sinogram_weighted, axis=0
     )  # (N_pixels^2,)
     recon = recon_flat.reshape(Nx, Ny)  # (N_pixels, N_pixels)
-    recon = np.rot90(recon, k=1)
+
+    # Normalize the recon
+    if normalize is True:
+        recon = (recon - recon.min()) / (recon.max() - recon.min())
 
     return recon
 

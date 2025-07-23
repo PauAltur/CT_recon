@@ -86,10 +86,6 @@ def build_freq_filter(N, filter_type="ramp", cutoff=None, period=None, num_terms
         filt *= 0.54 + 0.46 * np.cos(np.pi * freqs / cutoff)
     elif filter_type == "hann":
         filt *= 0.5 * (1 + np.cos(np.pi * freqs / cutoff))
-    # elif filter_type == "LoSinc":
-    #     filt = np.full(N, 1 / (4 * period ** 2), dtype=np.float64)
-    #     for k in range(1, 2 * num_terms, 2):  # odd terms only
-    #         filt -= (2 / (np.pi ** 2 * period ** 2)) * (np.cos(2 * np.pi * k * freqs[:, 0]) / (k ** 2))
     elif filter_type != "ramp":
         raise ValueError(f"Unknown filter: {filter_type}")
 
@@ -137,7 +133,8 @@ def filter_multiply(sinogram, filter_kernel, period=1.0):
     filtered_fft = sinogram_fft * filter_kernel  # broadcasted multiplication
 
     # Inverse FFT to get filtered sinogram in time domain and scale by period
-    filtered = period * np.fft.ifft(filtered_fft, axis=1).real
+    filtered = np.fft.ifft(filtered_fft, axis=1).real
+    # filtered *= period
 
     return filtered
 
